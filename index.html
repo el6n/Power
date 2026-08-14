@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Cursed Energy — Hand Tracking</title>
+<style>
+  :root{
+    --void-blue:#3d6bff;
+    --void-cyan:#8ecbff;
+    --curse-red:#c4102f;
+    --curse-ember:#ff5a3c;
+    --ink:#08090c;
+    --paper:#e9e7e2;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{
+    margin:0; padding:0; height:100%; overflow:hidden;
+    background:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+    color:var(--paper);
+  }
+  #stage{position:fixed; inset:0;}
+  video{
+    position:absolute; inset:0; width:100%; height:100%;
+    object-fit:cover; transform:scaleX(-1);
+  }
+  canvas{
+    position:absolute; inset:0; width:100%; height:100%;
+    transform:scaleX(-1);
+  }
+  #hud{
+    position:fixed; inset:0; pointer-events:none;
+    display:flex; flex-direction:column; justify-content:space-between;
+    padding:calc(env(safe-area-inset-top) + 14px) 16px calc(env(safe-area-inset-bottom) + 18px);
+    transform:none;
+  }
+  #title{
+    font-family:Georgia, "Times New Roman", serif;
+    font-size:13px; letter-spacing:.14em; text-transform:uppercase;
+    opacity:.55; font-weight:600;
+  }
+  #title span{display:block; font-size:10px; letter-spacing:.1em; opacity:.7; margin-top:2px;}
+  #status{
+    align-self:flex-start;
+    font-size:11px; letter-spacing:.06em; opacity:.6; margin-top:6px;
+    max-width:240px; line-height:1.5;
+  }
+  #controls{
+    pointer-events:auto;
+    display:flex; gap:10px; justify-content:center; align-items:center;
+  }
+  .domain-btn{
+    flex:1; max-width:150px;
+    padding:13px 10px;
+    border-radius:2px;
+    border:1px solid rgba(233,231,226,.25);
+    background:rgba(8,9,12,.55);
+    backdrop-filter:blur(6px);
+    color:var(--paper);
+    font-family:Georgia, serif;
+    font-size:13px; letter-spacing:.08em;
+    text-align:center;
+    transition:all .25s ease;
+  }
+  .domain-btn small{display:block; font-size:9px; letter-spacing:.14em; opacity:.55; margin-top:3px; font-family:-apple-system,sans-serif;}
+  .domain-btn.active.gojo{
+    border-color:var(--void-cyan);
+    box-shadow:0 0 22px -4px var(--void-blue), inset 0 0 18px -8px var(--void-blue);
+    color:var(--void-cyan);
+  }
+  .domain-btn.active.sukuna{
+    border-color:var(--curse-ember);
+    box-shadow:0 0 22px -4px var(--curse-red), inset 0 0 18px -8px var(--curse-red);
+    color:var(--curse-ember);
+  }
+  #banner{
+    position:fixed; left:0; right:0; top:42%;
+    text-align:center; pointer-events:none;
+    font-family:Georgia, serif; letter-spacing:.24em; text-transform:uppercase;
+    font-size:15px; opacity:0; transition:opacity .5s ease;
+  }
+  #banner.show{opacity:1;}
+  #banner.gojo{color:var(--void-cyan); text-shadow:0 0 24px var(--void-blue);}
+  #banner.sukuna{color:var(--curse-ember); text-shadow:0 0 24px var(--curse-red);}
+  #permission{
+    position:fixed; inset:0; z-index:20;
+    background:var(--ink); display:flex; flex-direction:column;
+    align-items:center; justify-content:center; text-align:center; padding:32px;
+  }
+  #permission h1{
+    font-family:Georgia, serif; font-weight:600; font-size:20px; letter-spacing:.06em;
+    margin:0 0 10px;
+  }
+  #permission p{font-size:13px; opacity:.6; line-height:1.6; max-width:280px; margin:0 0 22px;}
+  #startBtn{
+    padding:14px 34px; border-radius:2px; border:1px solid rgba(233,231,226,.4);
+    background:transparent; color:var(--paper); font-size:13px; letter-spacing:.1em;
+    text-transform:uppercase; font-family:Georgia, serif;
+  }
+  #startBtn:active{background:rgba(233,231,226,.1);}
+  #legend{
+    pointer-events:none;
+    font-size:10px; line-height:1.7; opacity:.55;
+    max-width:280px; margin:0 0 10px;
+  }
+  #legend b{opacity:.9; font-weight:600;}
+  #domainFlash{
+    position:fixed; inset:0; pointer-events:none;
+    opacity:0; transition:opacity .3s ease;
+    z-index:5;
+  }
+  #domainFlash.show{opacity:1;}
+</style>
+</head>
+<body>
+
+<div id="permission">
+  <h1>Cursed Energy</h1>
+  <p>Hand-tracked visual effects, rendered entirely on-device. Grant camera access to bind a domain.</p>
+  <button id="startBtn">Begin</button>
+</div>
+
+<div id="stage">
+  <video id="video" playsinline autoplay muted></video>
+  <canvas id="canvas"></canvas>
+</div>
+
+<div id="banner"></div>
+<div id="domainFlash"></div>
+
+<div id="hud">
+  <div>
+    <div id="title">Cursed Energy Overlay<span>original fan-made visual effect — not affiliated with JJK</span></div>
+    <div id="status">Loading tracking model…</div>
+  </div>
+  <div id="legend">
+    <div id="legendGojo" class="legend-block">
+      <b>Limitless Blue</b> pinch thumb+index — pulls energy inward<br>
+      <b>Limitless Red</b> pinch thumb+pinky — pushes energy outward<br>
+      <b>Purple</b> both hands pinch at once — combined burst<br>
+      <b>Domain</b> hold open palm still ~1s — infinite void field
+    </div>
+    <div id="legendSukuna" class="legend-block" style="display:none;">
+      <b>Dismantle</b> quick hand flick — single slash trail<br>
+      <b>Cleave</b> fast repeated motion — multi-slash arc<br>
+      <b>Fire Arrow</b> point index finger and thrust forward<br>
+      <b>Domain</b> hold open palm still ~1s — malevolent shrine field
+    </div>
+  </div>
+  <div id="controls">
+    <button class="domain-btn gojo" data-mode="gojo">Limitless<small>infinity / blue</small></button>
+    <button class="domain-btn sukuna" data-mode="sukuna">Malevolent<small>slash / crimson</small></button>
+  </div>
+</div>
+
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const video = document.getElementById('video');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const statusEl = document.getElementById('status');
+const bannerEl = document.getElementById('banner');
+const startBtn = document.getElementById('startBtn');
+const permission = document.getElementById('permission');
+
+let mode = 'gojo';
+let handLandmarker = null;
+let lastVideoTime = -1;
+let results = null;
+
+document.querySelectorAll('.domain-btn').forEach(btn=>{
+  btn.addEventListener('click', ()=>{
+    mode = btn.dataset.mode;
+    document.querySelectorAll('.domain-btn').forEach(b=>b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('legendGojo').style.display = mode==='gojo' ? 'block':'none';
+    document.getElementById('legendSukuna').style.display = mode==='sukuna' ? 'block':'none';
+    flashBanner(mode === 'gojo' ? 'Limitless' : 'Cursed Technique');
+  });
+});
+document.querySelector('.domain-btn.gojo').classList.add('active');
+const domainFlashEl = document.getElementById('domainFlash');
+
+function flashBanner(text){
+  bannerEl.textContent = text;
+  bannerEl.className = mode + ' show';
+  clearTimeout(flashBanner._t);
+  flashBanner._t = setTimeout(()=> bannerEl.classList.remove('show'), 1400);
+}
+
+function resize(){
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+
+async function setup(){
+  statusEl.textContent = 'Loading tracking model…';
+  const filesetResolver = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
+    baseOptions: {
+      modelAssetPath: "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU"
+    },
+    runningMode: "VIDEO",
+    numHands: 2
+  });
+
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: 'user', width:{ideal:960}, height:{ideal:1280} },
+    audio: false
+  });
+  video.srcObject = stream;
+  await new Promise(res => video.onloadedmetadata = res);
+  video.play();
+  resize();
+  statusEl.textContent = 'Tracking active — see gesture guide below';
+  requestAnimationFrame(loop);
+}
+
+startBtn.addEventListener('click', async ()=>{
+  startBtn.disabled = true;
+  startBtn.textContent = 'Starting…';
+  try{
+    await setup();
+    permission.style.display = 'none';
+  }catch(err){
+    statusEl.textContent = 'Camera access denied or unsupported.';
+    startBtn.textContent = 'Try again';
+    startBtn.disabled = false;
+  }
+});
+
+// ---- particle systems ----
+let particles = [];
+function spawnGojoParticle(x,y){
+  particles.push({
+    mode:'gojo', x, y,
+    angle: Math.random()*Math.PI*2,
+    radius: 6 + Math.random()*4,
+    speed: 0.02 + Math.random()*0.03,
+    life: 1, decay: 0.008 + Math.random()*0.01,
+    size: 1 + Math.random()*2.4,
+    orbit: 24 + Math.random()*70
+  });
+}
+function spawnSukunaParticle(x,y,dx,dy){
+  particles.push({
+    mode:'sukuna', x, y,
+    vx: dx*0.4 + (Math.random()-0.5)*3,
+    vy: dy*0.4 + (Math.random()-0.5)*3,
+    life:1, decay: 0.02 + Math.random()*0.02,
+    size: 1.5 + Math.random()*3
+  });
+}
+
+function dist(a,b){ return Math.hypot(a.x-b.x, a.y-b.y); }
+
+let prevTips = {};
+let stillTimers = {};      // per-hand stillness accumulation, for domain trigger
+let domainActive = { gojo:false, sukuna:false };
+let domainCooldown = 0;
+let slashCount = {};       // per-hand recent-slash counter for "cleave" escalation
+
+function triggerDomain(kind){
+  if(domainCooldown > 0) return;
+  domainCooldown = 240; // frames before it can trigger again
+  domainActive[kind] = true;
+  flashBanner(kind==='gojo' ? 'Unlimited Void' : 'Malevolent Shrine');
+  domainFlashEl.style.background = kind==='gojo'
+    ? 'radial-gradient(circle at center, rgba(61,107,255,0.35), rgba(8,9,12,0.0) 70%)'
+    : 'radial-gradient(circle at center, rgba(196,16,47,0.4), rgba(8,9,12,0.0) 70%)';
+  domainFlashEl.classList.add('show');
+  setTimeout(()=>{
+    domainFlashEl.classList.remove('show');
+    domainActive[kind] = false;
+  }, 1600);
+}
+
+function drawGojoHand(lm, handIndex, w, h){
+  const palm = lm[9];
+  const px = palm.x*w, py = palm.y*h;
+  const thumb = lm[4], index = lm[8], pinky = lm[20];
+  const pinchBlue = dist({x:thumb.x*w,y:thumb.y*h}, {x:index.x*w,y:index.y*h}) < 40;
+  const pinchRed  = dist({x:thumb.x*w,y:thumb.y*h}, {x:pinky.x*w,y:pinky.y*h}) < 40;
+
+  // stillness tracking -> domain trigger (open palm, low movement)
+  const key = 'g'+handIndex;
+  const prev = prevTips[key] || {x:px,y:py};
+  const moveSpeed = dist(prev,{x:px,y:py});
+  prevTips[key] = {x:px,y:py};
+  const spread = dist({x:lm[4].x*w,y:lm[4].y*h}, {x:lm[20].x*w,y:lm[20].y*h});
+  if(spread > 150 && moveSpeed < 4){
+    stillTimers[key] = (stillTimers[key]||0) + 1;
+    if(stillTimers[key] > 40) triggerDomain('gojo');
+  } else {
+    stillTimers[key] = 0;
+  }
+
+  // ambient orbiting particles
+  if(Math.random() < 0.9) spawnGojoParticle(px, py);
+
+  // faint skeleton
+  ctx.strokeStyle = 'rgba(142,203,255,0.3)';
+  ctx.lineWidth = 1;
+  const bones = [[0,1],[1,2],[2,3],[3,4],[0,5],[5,6],[6,7],[7,8],[5,9],[9,10],[10,11],[11,12],[9,13],[13,14],[14,15],[15,16],[13,17],[17,18],[18,19],[19,20],[0,17]];
+  bones.forEach(([a,b])=>{
+    ctx.beginPath();
+    ctx.moveTo(lm[a].x*w, lm[a].y*h);
+    ctx.lineTo(lm[b].x*w, lm[b].y*h);
+    ctx.stroke();
+  });
+
+  [4,8,12,16,20].forEach(i=>{
+    const p = lm[i];
+    ctx.beginPath();
+    ctx.arc(p.x*w, p.y*h, (pinchBlue||pinchRed)?4:2.2, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(200,230,255,0.9)';
+    ctx.fill();
+  });
+
+  // BLUE — attraction: particles drawn inward, cool cyan burst
+  if(pinchBlue){
+    const grad = ctx.createRadialGradient(px,py,0,px,py, 130);
+    grad.addColorStop(0,'rgba(180,220,255,0.55)');
+    grad.addColorStop(0.4,'rgba(61,107,255,0.35)');
+    grad.addColorStop(1,'rgba(61,107,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(px,py,130,0,Math.PI*2); ctx.fill();
+    for(let i=0;i<4;i++) spawnGojoParticle(px,py);
+  }
+  // RED — repulsion: sharper white-hot outward burst rings
+  if(pinchRed){
+    ctx.strokeStyle = 'rgba(220,240,255,0.7)';
+    ctx.lineWidth = 2;
+    for(let r=20; r<100; r+=26){
+      ctx.beginPath(); ctx.arc(px,py,r,0,Math.PI*2); ctx.stroke();
+    }
+  }
+  // PURPLE — both simultaneously: strongest combined blast
+  if(pinchBlue && pinchRed){
+    const grad = ctx.createRadialGradient(px,py,0,px,py, 200);
+    grad.addColorStop(0,'rgba(220,180,255,0.6)');
+    grad.addColorStop(0.5,'rgba(140,80,255,0.35)');
+    grad.addColorStop(1,'rgba(140,80,255,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(px,py,200,0,Math.PI*2); ctx.fill();
+    if(Math.random()<0.3) flashBanner('Hollow Purple');
+  }
+
+  if(domainActive.gojo) drawDomainField('gojo', w, h, px, py);
+}
+
+function drawSukunaHand(lm, handIndex, w, h){
+  const palm = lm[9];
+  const px = palm.x*w, py = palm.y*h;
+  const key = 'h'+handIndex;
+  const prev = prevTips[key] || {x:px,y:py};
+  const dx = px - prev.x, dy = py - prev.y;
+  const speed = Math.hypot(dx,dy);
+  prevTips[key] = {x:px,y:py};
+
+  // stillness -> domain trigger
+  const spread = dist({x:lm[4].x*w,y:lm[4].y*h}, {x:lm[20].x*w,y:lm[20].y*h});
+  const skey = 's'+handIndex;
+  if(spread > 150 && speed < 4){
+    stillTimers[skey] = (stillTimers[skey]||0) + 1;
+    if(stillTimers[skey] > 40) triggerDomain('sukuna');
+  } else {
+    stillTimers[skey] = 0;
+  }
+
+  // jagged cursed skeleton
+  ctx.strokeStyle = 'rgba(196,16,47,0.5)';
+  ctx.lineWidth = 1.4;
+  const bones = [[0,5],[5,9],[9,13],[13,17],[0,17],[5,6],[6,7],[7,8],[9,10],[10,11],[11,12],[13,14],[14,15],[15,16],[17,18],[18,19],[19,20],[0,1],[1,2],[2,3],[3,4]];
+  bones.forEach(([a,b])=>{
+    ctx.beginPath();
+    ctx.moveTo(lm[a].x*w, lm[a].y*h);
+    ctx.lineTo(lm[b].x*w, lm[b].y*h);
+    ctx.stroke();
+  });
+
+  [4,8,12,16,20].forEach(i=>{
+    const p = lm[i];
+    ctx.beginPath();
+    ctx.arc(p.x*w, p.y*h, 2.5, 0, Math.PI*2);
+    ctx.fillStyle = 'rgba(255,120,80,0.9)';
+    ctx.fill();
+  });
+
+  // DISMANTLE — single quick flick: one clean slash
+  if(speed > 14 && speed < 30){
+    ctx.strokeStyle = 'rgba(255,90,60,0.55)';
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(prev.x, prev.y); ctx.lineTo(px, py); ctx.stroke();
+    for(let i=0;i<6;i++) spawnSukunaParticle(px,py,dx,dy);
+    slashCount[skey] = (slashCount[skey]||0) + 1;
+  }
+  // CLEAVE — sustained fast motion: multi-angle slash fan
+  if(speed >= 30){
+    ctx.save();
+    for(let i=-1;i<=1;i++){
+      ctx.strokeStyle = `rgba(255,60,40,${0.5 - Math.abs(i)*0.15})`;
+      ctx.lineWidth = 4 - Math.abs(i);
+      const ang = Math.atan2(dy,dx) + i*0.35;
+      const len = Math.hypot(dx,dy)*1.4 + 30;
+      ctx.beginPath();
+      ctx.moveTo(px - Math.cos(ang)*len*0.5, py - Math.sin(ang)*len*0.5);
+      ctx.lineTo(px + Math.cos(ang)*len*0.5, py + Math.sin(ang)*len*0.5);
+      ctx.stroke();
+    }
+    ctx.restore();
+    for(let i=0;i<10;i++) spawnSukunaParticle(px,py,dx,dy);
+    flashBanner('Cleave');
+  }
+
+  // FIRE ARROW — index finger extended and thrust toward camera (rapid z/size change proxy: spread narrow + fast forward speed)
+  const indexExtended = dist({x:lm[8].x*w,y:lm[8].y*h}, {x:lm[5].x*w,y:lm[5].y*h}) > 70;
+  const othersCurled = dist({x:lm[12].x*w,y:lm[12].y*h}, {x:lm[9].x*w,y:lm[9].y*h}) < 45;
+  if(indexExtended && othersCurled && speed > 10){
+    const tip = lm[8];
+    const tx = tip.x*w, ty = tip.y*h;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255,140,60,0.8)';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(tx - dx*6, ty - dy*6);
+    ctx.lineTo(tx, ty);
+    ctx.stroke();
+    ctx.restore();
+    for(let i=0;i<3;i++) spawnSukunaParticle(tx,ty,dx*2,dy*2);
+  }
+
+  // open palm ambient radiant glow (base cursed energy)
+  if(spread > 160){
+    const grad = ctx.createRadialGradient(px,py,0,px,py,110);
+    grad.addColorStop(0,'rgba(255,120,70,0.35)');
+    grad.addColorStop(0.5,'rgba(196,16,47,0.2)');
+    grad.addColorStop(1,'rgba(196,16,47,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(px,py,110,0,Math.PI*2); ctx.fill();
+  }
+
+  if(domainActive.sukuna) drawDomainField('sukuna', w, h, px, py);
+}
+
+// full-screen domain expansion visual: radiating lines from the triggering hand
+function drawDomainField(kind, w, h, cx, cy){
+  const t = performance.now()/1000;
+  const color = kind==='gojo' ? '142,203,255' : '255,90,60';
+  ctx.save();
+  ctx.globalAlpha = 0.5;
+  for(let i=0;i<24;i++){
+    const ang = (i/24)*Math.PI*2 + t*0.5;
+    const len = Math.max(w,h);
+    ctx.strokeStyle = `rgba(${color},${0.15 + 0.1*Math.sin(t*3+i)})`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.lineTo(cx + Math.cos(ang)*len, cy + Math.sin(ang)*len);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function updateAndDrawParticles(w,h){
+  particles.forEach(p=>{
+    p.life -= p.decay;
+    if(p.mode==='gojo'){
+      p.angle += p.speed;
+      const ox = p.x + Math.cos(p.angle)*p.orbit*(1-p.life*0.3);
+      const oy = p.y + Math.sin(p.angle)*p.orbit*(1-p.life*0.3);
+      ctx.beginPath();
+      ctx.arc(ox, oy, p.size, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(142,203,255,${Math.max(p.life,0)*0.8})`;
+      ctx.fill();
+    } else {
+      p.x += p.vx; p.y += p.vy;
+      p.vx *= 0.96; p.vy *= 0.96;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI*2);
+      ctx.fillStyle = `rgba(255,90,60,${Math.max(p.life,0)*0.85})`;
+      ctx.fill();
+    }
+  });
+  particles = particles.filter(p=>p.life > 0);
+}
+
+function loop(){
+  requestAnimationFrame(loop);
+  if(!handLandmarker || video.readyState < 2) return;
+
+  if(domainCooldown > 0) domainCooldown--;
+
+  ctx.clearRect(0,0,canvas.width, canvas.height);
+
+  if(video.currentTime !== lastVideoTime){
+    lastVideoTime = video.currentTime;
+    results = handLandmarker.detectForVideo(video, performance.now());
+  }
+
+  const w = canvas.width, h = canvas.height;
+  const vw = video.videoWidth, vh = video.videoHeight;
+  // scale landmark coords (normalized 0-1 of video) to canvas, accounting for object-fit:cover
+  const videoAspect = vw/vh, canvasAspect = w/h;
+  let sx=1, sy=1, ox=0, oy=0;
+  if(canvasAspect > videoAspect){
+    sy = (w/videoAspect)/h;
+    oy = (h - h*sy)/2;
+  } else {
+    sx = (h*videoAspect)/w;
+    ox = (w - w*sx)/2;
+  }
+
+  if(results && results.landmarks){
+    results.landmarks.forEach((rawLm, idx)=>{
+      const lm = rawLm.map(p=>({
+        x: (p.x*w*sx + ox)/w,
+        y: (p.y*h*sy + oy)/h
+      }));
+      if(mode === 'gojo') drawGojoHand(lm, idx, w, h);
+      else drawSukunaHand(lm, idx, w, h);
+    });
+  }
+
+  updateAndDrawParticles(w,h);
+}
+</script>
+</body>
+</html>
